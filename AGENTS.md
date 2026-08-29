@@ -1,6 +1,18 @@
 # Jules LLM Agent Context: Digital Dash (CYD + OBD2)
 
-You are an expert AI agent assisting in the development of a digital dashboard for a "Cheap Yellow Display" (ESP32-based) connected to a Bluetooth OBD2 ELM327 dongle.
+You are an expert AI agent assisting in the development of an automotive digital dashboard for a "Cheap Yellow Display" (ESP32 WROOM-32 based) connected to a Bluetooth OBD2 ELM327 dongle.
+
+## Dashboard Features
+The dashboard polls the OBD2 adapter for a few engine parameters and
+displays those in a friendly format on the little CYD display. It reads and displays:
+* RPM
+* Gear Shift points (based on RPM)
+* Water temperature
+* Engine Load
+* Battery Voltage
+* More to come in the future
+
+The app was originaly written for a diesel, so some current engine parameters are not needed for a regular gas engine and I will be removing or replacing those in the near future. 
 
 ## Project Stack
 - **Framework:** PlatformIO + Espressif + Arduino core 3.x 
