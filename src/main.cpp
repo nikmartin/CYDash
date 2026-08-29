@@ -59,6 +59,9 @@ static lv_color_t buf[screenWidth * 20];
 // --- UI Elements ---
 lv_obj_t * shift_leds[10];
 lv_obj_t * rpm_val_label;
+lv_obj_t * rpm_bg_bar;
+lv_obj_t * scale_left;
+lv_obj_t * scale_right;
 lv_obj_t * bat_val_label;
 lv_obj_t * coolant_val_label;
 lv_obj_t * iat_val_label;
@@ -85,11 +88,17 @@ float tripFuel = 0.0f;
 float currentAvgKml = 0.0f;
 unsigned long lastCalcTime = 0;
 
-// --- Diesel Constants (Ritz 1.3 DDiS) ---
+// --- Engine & RPM Constants ---
 constexpr float DIESEL_DENSITY = 835.0f; // g/L
 constexpr uint32_t SHIFT_POINT_LO = 1800; // RPM
 constexpr uint32_t SHIFT_POINT_HI = 3500; // RPM
-// constexpr uint32_t RPM_REDLINE = 5500; //Redline
+constexpr uint32_t RPM_REDLINE = 5500; // Redline RPM
+
+// --- HUD Color Constants ---
+constexpr uint32_t COLOR_BAR_NORMAL    = 0x008000; // Dark Green
+constexpr uint32_t COLOR_BAR_REDLINE   = 0xFF0000; // Red
+constexpr uint32_t COLOR_SCALE_NORMAL  = 0xCCCCCC; // Light Gray / White
+constexpr uint32_t COLOR_SCALE_REDLINE = 0xFF0000; // Red
 
 // --- Polling Timers ---
 unsigned long lastElmUpdate = 0;
@@ -159,8 +168,91 @@ void buildUI() {
   lv_obj_set_style_border_color(center_cont, lv_color_hex(0x444444), 0);
   lv_obj_set_style_border_width(center_cont, 2, 0);
   lv_obj_set_style_radius(center_cont, BORDER_RADIUS, 0);
+  lv_obj_set_style_pad_all(center_cont, 0, 0);
   lv_obj_clear_flag(center_cont, LV_OBJ_FLAG_SCROLLABLE);
 
+  // Background RPM fill bar (fills container vertically behind scales & text)
+  rpm_bg_bar = lv_bar_create(center_cont);
+  lv_obj_set_size(rpm_bg_bar, 136, 168);
+  lv_obj_align(rpm_bg_bar, LV_ALIGN_CENTER, 0, 0);
+  lv_bar_set_range(rpm_bg_bar, 0, 7000);
+  lv_bar_set_value(rpm_bg_bar, 0, LV_ANIM_OFF);
+  lv_obj_set_style_bg_color(rpm_bg_bar, lv_color_hex(0x111111), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(rpm_bg_bar, LV_OPA_TRANSP, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(rpm_bg_bar, lv_color_hex(COLOR_BAR_NORMAL), LV_PART_INDICATOR);
+  lv_obj_set_style_radius(rpm_bg_bar, 0, LV_PART_MAIN);
+  lv_obj_set_style_radius(rpm_bg_bar, 0, LV_PART_INDICATOR);
+
+  // Custom tick label formatting for scales (0-7 for 0-7000 RPM)
+  auto scale_label_cb = [](lv_obj_t * scale, int32_t temp_cnt) -> const char * {
+    static char buf[8][4] = {"0", "1", "2", "3", "4", "5", "6", "7"};
+    if (temp_cnt >= 0 && temp_cnt <= 7) {
+      return buf[temp_cnt];
+    }
+    return "";
+  };
+
+  // Left Scale (Ticks & Labels on Right / Inside)
+  scale_left = lv_scale_create(center_cont);
+  lv_obj_set_size(scale_left, 45, 150);
+  lv_obj_align(scale_left, LV_ALIGN_LEFT_MID, 2, 0);
+  lv_scale_set_mode(scale_left, LV_SCALE_MODE_VERTICAL_RIGHT);
+  lv_scale_set_range(scale_left, 0, 7000);
+  lv_scale_set_total_tick_count(scale_left, 15); // 8 major ticks (0..7) + 7 minor ticks
+  lv_scale_set_major_tick_every(scale_left, 2);
+  lv_scale_set_label_show(scale_left, true);
+  lv_scale_set_custom_label_cb(scale_left, scale_label_cb);
+  lv_obj_set_style_length(scale_left, 8, LV_PART_ITEMS);       // Major tick length
+  lv_obj_set_style_length(scale_left, 4, LV_PART_INDICATOR);   // Minor tick length
+  lv_obj_set_style_line_color(scale_left, lv_color_hex(COLOR_SCALE_NORMAL), LV_PART_MAIN);
+  lv_obj_set_style_line_color(scale_left, lv_color_hex(COLOR_SCALE_NORMAL), LV_PART_ITEMS);
+  lv_obj_set_style_line_color(scale_left, lv_color_hex(COLOR_SCALE_NORMAL), LV_PART_INDICATOR);
+  lv_obj_set_style_text_color(scale_left, lv_color_hex(COLOR_SCALE_NORMAL), LV_PART_MAIN);
+
+  // Left Scale Section: Normal (0..5500) and Redline (5500..7000)
+  lv_scale_section_t * section_left_normal = lv_scale_add_section(scale_left);
+  lv_scale_section_set_range(section_left_normal, 0, RPM_REDLINE);
+  lv_scale_section_set_style_main_line_color(section_left_normal, lv_color_hex(COLOR_SCALE_NORMAL));
+  lv_scale_section_set_style_indicator_color(section_left_normal, lv_color_hex(COLOR_SCALE_NORMAL));
+  lv_scale_section_set_style_items_color(section_left_normal, lv_color_hex(COLOR_SCALE_NORMAL));
+
+  lv_scale_section_t * section_left_redline = lv_scale_add_section(scale_left);
+  lv_scale_section_set_range(section_left_redline, RPM_REDLINE, 7000);
+  lv_scale_section_set_style_main_line_color(section_left_redline, lv_color_hex(COLOR_SCALE_REDLINE));
+  lv_scale_section_set_style_indicator_color(section_left_redline, lv_color_hex(COLOR_SCALE_REDLINE));
+  lv_scale_section_set_style_items_color(section_left_redline, lv_color_hex(COLOR_SCALE_REDLINE));
+
+  // Right Scale (Ticks & Labels on Left / Inside)
+  scale_right = lv_scale_create(center_cont);
+  lv_obj_set_size(scale_right, 45, 150);
+  lv_obj_align(scale_right, LV_ALIGN_RIGHT_MID, -2, 0);
+  lv_scale_set_mode(scale_right, LV_SCALE_MODE_VERTICAL_LEFT);
+  lv_scale_set_range(scale_right, 0, 7000);
+  lv_scale_set_total_tick_count(scale_right, 15);
+  lv_scale_set_major_tick_every(scale_right, 2);
+  lv_scale_set_label_show(scale_right, true);
+  lv_scale_set_custom_label_cb(scale_right, scale_label_cb);
+  lv_obj_set_style_length(scale_right, 8, LV_PART_ITEMS);
+  lv_obj_set_style_length(scale_right, 4, LV_PART_INDICATOR);
+  lv_obj_set_style_line_color(scale_right, lv_color_hex(COLOR_SCALE_NORMAL), LV_PART_MAIN);
+  lv_obj_set_style_line_color(scale_right, lv_color_hex(COLOR_SCALE_NORMAL), LV_PART_ITEMS);
+  lv_obj_set_style_line_color(scale_right, lv_color_hex(COLOR_SCALE_NORMAL), LV_PART_INDICATOR);
+  lv_obj_set_style_text_color(scale_right, lv_color_hex(COLOR_SCALE_NORMAL), LV_PART_MAIN);
+
+  // Right Scale Section: Normal (0..5500) and Redline (5500..7000)
+  lv_scale_section_t * section_right_normal = lv_scale_add_section(scale_right);
+  lv_scale_section_set_range(section_right_normal, 0, RPM_REDLINE);
+  lv_scale_section_set_style_main_line_color(section_right_normal, lv_color_hex(COLOR_SCALE_NORMAL));
+  lv_scale_section_set_style_indicator_color(section_right_normal, lv_color_hex(COLOR_SCALE_NORMAL));
+  lv_scale_section_set_style_items_color(section_right_normal, lv_color_hex(COLOR_SCALE_NORMAL));
+
+  lv_scale_section_t * section_right_redline = lv_scale_add_section(scale_right);
+  lv_scale_section_set_range(section_right_redline, RPM_REDLINE, 7000);
+  lv_scale_section_set_style_main_line_color(section_right_redline, lv_color_hex(COLOR_SCALE_REDLINE));
+  lv_scale_section_set_style_indicator_color(section_right_redline, lv_color_hex(COLOR_SCALE_REDLINE));
+  lv_scale_section_set_style_items_color(section_right_redline, lv_color_hex(COLOR_SCALE_REDLINE));
+
+  // Foreground RPM Value & Title (Rendered on top of background bar and scales)
   rpm_val_label = lv_label_create(center_cont);
   lv_label_set_text(rpm_val_label, "0");
   lv_obj_set_style_text_font(rpm_val_label, &lv_font_montserrat_48, 0);
@@ -231,11 +323,19 @@ void updateUI() {
     for(int i=7; i<10; i++) lv_led_off(shift_leds[i]);
   }
 
-  // 2. Labels (only update when values actually change to save CPU cycles)
+  // 2. Labels & Background RPM Bar (only update when values actually change to save CPU cycles)
   if (rpmToUse != lastDispRpm) {
     lastDispRpm = rpmToUse;
     sprintf(buf, "%d", rpmToUse);
     lv_label_set_text(rpm_val_label, buf);
+
+    // Update vertical RPM background bar fill level and redline indicator color
+    lv_bar_set_value(rpm_bg_bar, rpmToUse, LV_ANIM_OFF);
+    if ((uint32_t)rpmToUse >= RPM_REDLINE) {
+      lv_obj_set_style_bg_color(rpm_bg_bar, lv_color_hex(COLOR_BAR_REDLINE), LV_PART_INDICATOR);
+    } else {
+      lv_obj_set_style_bg_color(rpm_bg_bar, lv_color_hex(COLOR_BAR_NORMAL), LV_PART_INDICATOR);
+    }
   }
 
   if (fabs(currentAvgKml - lastDispAvgKml) > 0.05f) {
