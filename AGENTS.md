@@ -3,7 +3,7 @@
 You are an expert AI agent assisting in the development of a digital dashboard for a "Cheap Yellow Display" (ESP32-based) connected to a Bluetooth OBD2 ELM327 dongle.
 
 ## Project Stack
-- **Framework:** PlatformIO + Arduino
+- **Framework:** PlatformIO + Espressif + Arduino core 3.x 
 - **Board:** Cheap Yellow Display (ESP32-WROOM-32)
 - **GUI:** LVGL v9.5.0
 - **Display Driver:** TFT_eSPI
