@@ -183,25 +183,15 @@ void buildUI() {
   lv_obj_set_style_radius(rpm_bg_bar, 0, LV_PART_MAIN);
   lv_obj_set_style_radius(rpm_bg_bar, 0, LV_PART_INDICATOR);
 
-  // Custom tick label formatting for scales (0-7 for 0-7000 RPM)
-  auto scale_label_cb = [](lv_obj_t * scale, int32_t temp_cnt) -> const char * {
-    static char buf[8][4] = {"0", "1", "2", "3", "4", "5", "6", "7"};
-    if (temp_cnt >= 0 && temp_cnt <= 7) {
-      return buf[temp_cnt];
-    }
-    return "";
-  };
-
-  // Left Scale (Ticks & Labels on Right / Inside)
+  // Left Scale (Ticks & Labels on Right / Inside, Range 0..7 for x1000 RPM)
   scale_left = lv_scale_create(center_cont);
   lv_obj_set_size(scale_left, 45, 150);
   lv_obj_align(scale_left, LV_ALIGN_LEFT_MID, 2, 0);
   lv_scale_set_mode(scale_left, LV_SCALE_MODE_VERTICAL_RIGHT);
-  lv_scale_set_range(scale_left, 0, 7000);
+  lv_scale_set_range(scale_left, 0, 7);
   lv_scale_set_total_tick_count(scale_left, 15); // 8 major ticks (0..7) + 7 minor ticks
   lv_scale_set_major_tick_every(scale_left, 2);
   lv_scale_set_label_show(scale_left, true);
-  lv_scale_set_custom_label_cb(scale_left, scale_label_cb);
   lv_obj_set_style_length(scale_left, 8, LV_PART_ITEMS);       // Major tick length
   lv_obj_set_style_length(scale_left, 4, LV_PART_INDICATOR);   // Minor tick length
   lv_obj_set_style_line_color(scale_left, lv_color_hex(COLOR_SCALE_NORMAL), LV_PART_MAIN);
@@ -209,29 +199,28 @@ void buildUI() {
   lv_obj_set_style_line_color(scale_left, lv_color_hex(COLOR_SCALE_NORMAL), LV_PART_INDICATOR);
   lv_obj_set_style_text_color(scale_left, lv_color_hex(COLOR_SCALE_NORMAL), LV_PART_MAIN);
 
-  // Left Scale Section: Normal (0..5500) and Redline (5500..7000)
+  // Left Scale Section: Normal (0..5 = 0..5000 RPM) and Redline (5..7 = 5000..7000 RPM)
   lv_scale_section_t * section_left_normal = lv_scale_add_section(scale_left);
-  lv_scale_section_set_range(section_left_normal, 0, RPM_REDLINE);
+  lv_scale_section_set_range(section_left_normal, 0, RPM_REDLINE / 1000);
   lv_scale_section_set_style_main_line_color(section_left_normal, lv_color_hex(COLOR_SCALE_NORMAL));
   lv_scale_section_set_style_indicator_color(section_left_normal, lv_color_hex(COLOR_SCALE_NORMAL));
   lv_scale_section_set_style_items_color(section_left_normal, lv_color_hex(COLOR_SCALE_NORMAL));
 
   lv_scale_section_t * section_left_redline = lv_scale_add_section(scale_left);
-  lv_scale_section_set_range(section_left_redline, RPM_REDLINE, 7000);
+  lv_scale_section_set_range(section_left_redline, RPM_REDLINE / 1000, 7);
   lv_scale_section_set_style_main_line_color(section_left_redline, lv_color_hex(COLOR_SCALE_REDLINE));
   lv_scale_section_set_style_indicator_color(section_left_redline, lv_color_hex(COLOR_SCALE_REDLINE));
   lv_scale_section_set_style_items_color(section_left_redline, lv_color_hex(COLOR_SCALE_REDLINE));
 
-  // Right Scale (Ticks & Labels on Left / Inside)
+  // Right Scale (Ticks & Labels on Left / Inside, Range 0..7 for x1000 RPM)
   scale_right = lv_scale_create(center_cont);
   lv_obj_set_size(scale_right, 45, 150);
   lv_obj_align(scale_right, LV_ALIGN_RIGHT_MID, -2, 0);
   lv_scale_set_mode(scale_right, LV_SCALE_MODE_VERTICAL_LEFT);
-  lv_scale_set_range(scale_right, 0, 7000);
+  lv_scale_set_range(scale_right, 0, 7);
   lv_scale_set_total_tick_count(scale_right, 15);
   lv_scale_set_major_tick_every(scale_right, 2);
   lv_scale_set_label_show(scale_right, true);
-  lv_scale_set_custom_label_cb(scale_right, scale_label_cb);
   lv_obj_set_style_length(scale_right, 8, LV_PART_ITEMS);
   lv_obj_set_style_length(scale_right, 4, LV_PART_INDICATOR);
   lv_obj_set_style_line_color(scale_right, lv_color_hex(COLOR_SCALE_NORMAL), LV_PART_MAIN);
@@ -239,15 +228,15 @@ void buildUI() {
   lv_obj_set_style_line_color(scale_right, lv_color_hex(COLOR_SCALE_NORMAL), LV_PART_INDICATOR);
   lv_obj_set_style_text_color(scale_right, lv_color_hex(COLOR_SCALE_NORMAL), LV_PART_MAIN);
 
-  // Right Scale Section: Normal (0..5500) and Redline (5500..7000)
+  // Right Scale Section: Normal (0..5 = 0..5000 RPM) and Redline (5..7 = 5000..7000 RPM)
   lv_scale_section_t * section_right_normal = lv_scale_add_section(scale_right);
-  lv_scale_section_set_range(section_right_normal, 0, RPM_REDLINE);
+  lv_scale_section_set_range(section_right_normal, 0, RPM_REDLINE / 1000);
   lv_scale_section_set_style_main_line_color(section_right_normal, lv_color_hex(COLOR_SCALE_NORMAL));
   lv_scale_section_set_style_indicator_color(section_right_normal, lv_color_hex(COLOR_SCALE_NORMAL));
   lv_scale_section_set_style_items_color(section_right_normal, lv_color_hex(COLOR_SCALE_NORMAL));
 
   lv_scale_section_t * section_right_redline = lv_scale_add_section(scale_right);
-  lv_scale_section_set_range(section_right_redline, RPM_REDLINE, 7000);
+  lv_scale_section_set_range(section_right_redline, RPM_REDLINE / 1000, 7);
   lv_scale_section_set_style_main_line_color(section_right_redline, lv_color_hex(COLOR_SCALE_REDLINE));
   lv_scale_section_set_style_indicator_color(section_right_redline, lv_color_hex(COLOR_SCALE_REDLINE));
   lv_scale_section_set_style_items_color(section_right_redline, lv_color_hex(COLOR_SCALE_REDLINE));
