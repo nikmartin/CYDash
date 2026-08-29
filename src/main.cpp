@@ -6,10 +6,11 @@
 #include "BluetoothSerial.h"
 #include "ELMduino.h"
 #include "esp32-hal-ledc.h"
+#include "widgets/led/lv_led.h"
 #include <Preferences.h>
 
 
-#define DEBUG
+//  #define DEBUG
 
 #ifdef DEBUG
   #define DEBUG_PRINT(...) Serial.print(__VA_ARGS__)
@@ -59,6 +60,9 @@ static lv_color_t buf[screenWidth * 20];
 // --- UI Elements ---
 lv_obj_t * shift_leds[10];
 lv_obj_t * rpm_val_label;
+lv_obj_t * rpm_bg_bar;
+lv_obj_t * scale_left;
+lv_obj_t * scale_right;
 lv_obj_t * bat_val_label;
 lv_obj_t * coolant_val_label;
 lv_obj_t * iat_val_label;
@@ -85,11 +89,17 @@ float tripFuel = 0.0f;
 float currentAvgKml = 0.0f;
 unsigned long lastCalcTime = 0;
 
-// --- Diesel Constants (Ritz 1.3 DDiS) ---
+// --- Engine & RPM Constants ---
 constexpr float DIESEL_DENSITY = 835.0f; // g/L
 constexpr uint32_t SHIFT_POINT_LO = 1800; // RPM
 constexpr uint32_t SHIFT_POINT_HI = 3500; // RPM
-constexpr uint32_t RPM_REDLINE = 5500; //Redline
+constexpr uint32_t RPM_REDLINE = 5500; // Redline RPM
+
+// --- HUD Color Constants ---
+constexpr uint32_t COLOR_BAR_NORMAL    = 0x008000; // Dark Green
+constexpr uint32_t COLOR_BAR_REDLINE   = 0xFF0000; // Red
+constexpr uint32_t COLOR_SCALE_NORMAL  = 0xCCCCCC; // Light Gray / White
+constexpr uint32_t COLOR_SCALE_REDLINE = 0xFF0000; // Red
 
 // --- Polling Timers ---
 unsigned long lastElmUpdate = 0;
@@ -135,23 +145,12 @@ lv_obj_t* createDataBlock(lv_obj_t* parent, int x, int y, int w, int h, const ch
 }
 
 void buildUI() {
+
+  // Screen Object
   lv_obj_t * scr = lv_scr_act();
   lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), LV_PART_MAIN);
-
-  // 1. Shift Lights (Top Row)
-  int led_start_x = 10;
-  int led_spacing = 30;
-  for(int i=0; i<10; i++) {
-    shift_leds[i] = lv_led_create(scr);
-    lv_obj_set_size(shift_leds[i], 24, 12);
-    lv_obj_set_pos(shift_leds[i], led_start_x + (i * led_spacing), 5);
-    if (i < 4) lv_led_set_color(shift_leds[i], lv_color_hex(0x00FF00));
-    else if (i < 7) lv_led_set_color(shift_leds[i], lv_color_hex(0xFFFF00));
-    else lv_led_set_color(shift_leds[i], lv_color_hex(0xFF0000));
-    lv_led_off(shift_leds[i]);
-  }
-
-  // 2. Central RPM Module
+  
+  // 1. Central RPM Module
   lv_obj_t* center_cont = lv_obj_create(scr);
   lv_obj_set_size(center_cont, 140, 172);
   lv_obj_set_pos(center_cont, 90, 24);
@@ -159,8 +158,95 @@ void buildUI() {
   lv_obj_set_style_border_color(center_cont, lv_color_hex(0x444444), 0);
   lv_obj_set_style_border_width(center_cont, 2, 0);
   lv_obj_set_style_radius(center_cont, BORDER_RADIUS, 0);
+  lv_obj_set_style_pad_all(center_cont, 0, 0);
   lv_obj_clear_flag(center_cont, LV_OBJ_FLAG_SCROLLABLE);
 
+  // Background RPM fill bar (fills container vertically behind scales & text)
+  rpm_bg_bar = lv_bar_create(center_cont);
+  lv_obj_set_size(rpm_bg_bar, 136, 168);
+  lv_obj_align(rpm_bg_bar, LV_ALIGN_CENTER, 0, 0);
+  lv_bar_set_range(rpm_bg_bar, 0, 7000);
+  lv_bar_set_value(rpm_bg_bar, 0, LV_ANIM_OFF);
+  lv_obj_set_style_bg_color(rpm_bg_bar, lv_color_hex(0x111111), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(rpm_bg_bar, LV_OPA_TRANSP, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(rpm_bg_bar, lv_color_hex(COLOR_BAR_NORMAL), LV_PART_INDICATOR);
+  lv_obj_set_style_radius(rpm_bg_bar, 0, LV_PART_MAIN);
+  lv_obj_set_style_radius(rpm_bg_bar, 0, LV_PART_INDICATOR);
+
+  // Left Scale (Ticks & Labels on Right / Inside, Range 0..7 for x1000 RPM)
+  scale_left = lv_scale_create(center_cont);
+  lv_obj_set_size(scale_left, 45, 150);
+  lv_obj_align(scale_left, LV_ALIGN_LEFT_MID, 2, 0);
+  lv_scale_set_mode(scale_left, LV_SCALE_MODE_VERTICAL_RIGHT);
+  lv_scale_set_range(scale_left, 0, 7);
+  lv_scale_set_total_tick_count(scale_left, 15); // 8 major ticks (0..7) + 7 minor ticks
+  lv_scale_set_major_tick_every(scale_left, 2);
+  lv_scale_set_label_show(scale_left, true);
+  lv_obj_set_style_length(scale_left, 8, LV_PART_ITEMS);       // Major tick length
+  lv_obj_set_style_length(scale_left, 4, LV_PART_INDICATOR);   // Minor tick length
+  lv_obj_set_style_line_color(scale_left, lv_color_hex(COLOR_SCALE_NORMAL), LV_PART_MAIN);
+  lv_obj_set_style_line_color(scale_left, lv_color_hex(COLOR_SCALE_NORMAL), LV_PART_ITEMS);
+  lv_obj_set_style_line_color(scale_left, lv_color_hex(COLOR_SCALE_NORMAL), LV_PART_INDICATOR);
+  lv_obj_set_style_text_color(scale_left, lv_color_hex(COLOR_SCALE_NORMAL), LV_PART_MAIN);
+
+  // Styles for scale sections (normal vs redline)
+  static lv_style_t style_section_normal;
+  static lv_style_t style_section_redline;
+  static bool section_styles_inited = false;
+  if (!section_styles_inited) {
+    section_styles_inited = true;
+    lv_style_init(&style_section_normal);
+    lv_style_set_line_color(&style_section_normal, lv_color_hex(COLOR_SCALE_NORMAL));
+    lv_style_set_text_color(&style_section_normal, lv_color_hex(COLOR_SCALE_NORMAL));
+
+    lv_style_init(&style_section_redline);
+    lv_style_set_line_color(&style_section_redline, lv_color_hex(COLOR_SCALE_REDLINE));
+    lv_style_set_text_color(&style_section_redline, lv_color_hex(COLOR_SCALE_REDLINE));
+  }
+
+  // Left Scale Section: Normal (0..5 = 0..5000 RPM) and Redline (5..7 = 5000..7000 RPM)
+  lv_scale_section_t * section_left_normal = lv_scale_add_section(scale_left);
+  lv_scale_set_section_range(scale_left, section_left_normal, 0, RPM_REDLINE / 1000);
+  lv_scale_set_section_style_main(scale_left, section_left_normal, &style_section_normal);
+  lv_scale_set_section_style_indicator(scale_left, section_left_normal, &style_section_normal);
+  lv_scale_set_section_style_items(scale_left, section_left_normal, &style_section_normal);
+
+  lv_scale_section_t * section_left_redline = lv_scale_add_section(scale_left);
+  lv_scale_set_section_range(scale_left, section_left_redline, RPM_REDLINE / 1000, 7);
+  lv_scale_set_section_style_main(scale_left, section_left_redline, &style_section_redline);
+  lv_scale_set_section_style_indicator(scale_left, section_left_redline, &style_section_redline);
+  lv_scale_set_section_style_items(scale_left, section_left_redline, &style_section_redline);
+
+  // Right Scale (Ticks & Labels on Left / Inside, Range 0..7 for x1000 RPM)
+  scale_right = lv_scale_create(center_cont);
+  lv_obj_set_size(scale_right, 45, 150);
+  lv_obj_align(scale_right, LV_ALIGN_RIGHT_MID, -2, 0);
+  lv_scale_set_mode(scale_right, LV_SCALE_MODE_VERTICAL_LEFT);
+  lv_scale_set_range(scale_right, 0, 7);
+  lv_scale_set_total_tick_count(scale_right, 15);
+  lv_scale_set_major_tick_every(scale_right, 2);
+  lv_scale_set_label_show(scale_right, true);
+  lv_obj_set_style_length(scale_right, 8, LV_PART_ITEMS);
+  lv_obj_set_style_length(scale_right, 4, LV_PART_INDICATOR);
+  lv_obj_set_style_line_color(scale_right, lv_color_hex(COLOR_SCALE_NORMAL), LV_PART_MAIN);
+  lv_obj_set_style_line_color(scale_right, lv_color_hex(COLOR_SCALE_NORMAL), LV_PART_ITEMS);
+  lv_obj_set_style_line_color(scale_right, lv_color_hex(COLOR_SCALE_NORMAL), LV_PART_INDICATOR);
+  lv_obj_set_style_text_color(scale_right, lv_color_hex(COLOR_SCALE_NORMAL), LV_PART_MAIN);
+
+  // Right Scale Section: Normal (0..5 = 0..5000 RPM) and Redline (5..7 = 5000..7000 RPM)
+  lv_scale_section_t * section_right_normal = lv_scale_add_section(scale_right);
+  lv_scale_set_section_range(scale_right, section_right_normal, 0, RPM_REDLINE / 1000);
+  lv_scale_set_section_style_main(scale_right, section_right_normal, &style_section_normal);
+  lv_scale_set_section_style_indicator(scale_right, section_right_normal, &style_section_normal);
+  lv_scale_set_section_style_items(scale_right, section_right_normal, &style_section_normal);
+
+  lv_scale_section_t * section_right_redline = lv_scale_add_section(scale_right);
+  lv_scale_set_section_range(scale_right, section_right_redline, RPM_REDLINE / 1000, 7);
+  lv_scale_set_section_style_main(scale_right, section_right_redline, &style_section_redline);
+  lv_scale_set_section_style_indicator(scale_right, section_right_redline, &style_section_redline);
+  lv_scale_set_section_style_items(scale_right, section_right_redline, &style_section_redline);
+
+  // Foreground RPM Value & Title (Rendered on top of background bar and scales)
   rpm_val_label = lv_label_create(center_cont);
   lv_label_set_text(rpm_val_label, "0");
   lv_obj_set_style_text_font(rpm_val_label, &lv_font_montserrat_48, 0);
@@ -172,7 +258,7 @@ void buildUI() {
   lv_obj_set_style_text_color(center_title, lv_color_hex(0x00FFFF), 0);
   lv_obj_align(center_title, LV_ALIGN_BOTTOM_MID, 0, -15);
 
-  // 3. Peripheral Modules (optimized heights and positions)
+  // 2. Peripheral Modules (optimized heights and positions)
   int col_w = 80, row_h = 54, left_x = 5, right_x = 235;
   coolant_val_label = createDataBlock(scr, left_x, 24, col_w, row_h, "TEMP C", lv_color_hex(0xFF8800));
   iat_val_label     = createDataBlock(scr, left_x, 83, col_w, row_h, "IAT C", lv_color_hex(0xFF8800));
@@ -181,7 +267,7 @@ void buildUI() {
   boost_val_label   = createDataBlock(scr, right_x, 83, col_w, row_h, "BOOST", lv_color_hex(0x00FFFF));
   bat_val_label     = createDataBlock(scr, right_x, 142, col_w, row_h, "BAT V", lv_color_hex(0xFF8800));
   
-  // 4. Bottom Bar (thinned out)
+  // 3. Bottom Bar (thinned out)
   lv_obj_t* bottom_cont = lv_obj_create(scr);
   lv_obj_set_size(bottom_cont, 310, 28);
   lv_obj_set_pos(bottom_cont, 5, 205);
@@ -204,7 +290,22 @@ void buildUI() {
   lv_obj_set_style_text_font(status_label, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(status_label, lv_color_hex(0xFF0000), 0);
   lv_obj_align(status_label, LV_ALIGN_RIGHT_MID, 0, 0);
+
+  // 4. Shift Lights (Top Row)
+  int led_start_x = 10;
+  int led_spacing = 30;
+  for(int i=0; i<10; i++) {
+    shift_leds[i] = lv_led_create(scr);
+    lv_obj_set_size(shift_leds[i], 24, 12);
+    lv_obj_set_pos(shift_leds[i], led_start_x + (i * led_spacing), 5);
+    if (i < 4) lv_led_set_color(shift_leds[i], lv_color_hex(0x00FF00));
+    else if (i < 7) lv_led_set_color(shift_leds[i], lv_color_hex(0xFFFF00));
+    else lv_led_set_color(shift_leds[i], lv_color_hex(0xFF0000));
+    lv_led_off(shift_leds[i]);
+  }
+
 }
+
 
 void updateUI() {
   char buf[32];
@@ -224,18 +325,30 @@ void updateUI() {
   float step = (float)(shift_end - shift_start) / 10.0;
   for(int i = 0; i < 10; i++) {
     int threshold = shift_start + (i * step);
-    if (rpmToUse >= threshold) lv_led_on(shift_leds[i]);
-    else lv_led_off(shift_leds[i]);
+    if (rpmToUse >= threshold) { 
+      lv_led_on(shift_leds[i]);
+    }
+    else {
+      lv_led_off(shift_leds[i]);
+    }
   }
   if (rpmToUse >= shift_end && (millis() / 100) % 2 == 0) {
     for(int i=7; i<10; i++) lv_led_off(shift_leds[i]);
   }
 
-  // 2. Labels (only update when values actually change to save CPU cycles)
+  // 2. Labels & Background RPM Bar (only update when values actually change to save CPU cycles)
   if (rpmToUse != lastDispRpm) {
     lastDispRpm = rpmToUse;
     sprintf(buf, "%d", rpmToUse);
     lv_label_set_text(rpm_val_label, buf);
+
+    // Update vertical RPM background bar fill level and redline indicator color
+    lv_bar_set_value(rpm_bg_bar, rpmToUse, LV_ANIM_OFF);
+    if ((uint32_t)rpmToUse >= RPM_REDLINE) {
+      lv_obj_set_style_bg_color(rpm_bg_bar, lv_color_hex(COLOR_BAR_REDLINE), LV_PART_INDICATOR);
+    } else {
+      lv_obj_set_style_bg_color(rpm_bg_bar, lv_color_hex(COLOR_BAR_NORMAL), LV_PART_INDICATOR);
+    }
   }
 
   if (fabs(currentAvgKml - lastDispAvgKml) > 0.05f) {
@@ -327,6 +440,7 @@ void connectBluetooth() {
         }
       }
     }
+
   }
 
   if (!found) {
@@ -404,9 +518,9 @@ void setup() {
   // Turn all LEDs off initially (Active Low)
   digitalWrite(RED_LED, HIGH);
   digitalWrite(GREEN_LED, HIGH);
-  digitalWrite(BLUE_LED, HIGH);
+  digitalWrite(BLUE_LED, LOW);
   delay(250);
-  digitalWrite(BLUE_LED,LOW); 
+  digitalWrite(BLUE_LED, HIGH);
 
   lv_init();
 
@@ -423,7 +537,8 @@ void setup() {
     preferences.getBytes("mac", storedMac, 6);
   }
   preferences.end();
-
+  
+ 
   ELM_PORT.begin("ESP32_CYDash", true); 
   connectBluetooth();
 }
