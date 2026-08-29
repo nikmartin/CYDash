@@ -25,5 +25,6 @@
 
 #define SMOOTH_FONT
 
-#define SPI_FREQUENCY  55000000
-#define SPI_READ_FREQUENCY  20000000
+#define SPI_FREQUENCY       55000000  // 55 MHz for blistering-fast UI rendering
+#define SPI_READ_FREQUENCY  20000000  // 20 MHz safely reads pixel data back if needed
+#define SPI_TOUCH_FREQUENCY  2500000  // 2.5 MHz ensures stable touch reading

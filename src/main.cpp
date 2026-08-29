@@ -1,22 +1,24 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <TFT_eSPI.h>
+#include <cstdint>
 #include <lvgl.h>
 #include "BluetoothSerial.h"
 #include "ELMduino.h"
+#include "esp32-hal-ledc.h"
 #include <Preferences.h>
 
-//#define DEBUG
 
+#define DEBUG
 
 #ifdef DEBUG
-#define DEBUG_PRINT(...) Serial.println(__VA_ARGS__)
-#define DEBUG_PRINTF(...) Serial.printf(__VA_ARGS__)
-#define DEBUG_PRINTLN(...) Serial.println(__VA_ARGS__)
+  #define DEBUG_PRINT(...) Serial.print(__VA_ARGS__)
+  #define DEBUG_PRINTF(...) Serial.printf(__VA_ARGS__)
+  #define DEBUG_PRINTLN(...) Serial.println(__VA_ARGS__)
 #else
-#define DEBUG_PRINT(...)
-#define DEBUG_PRINTF(...)
-#define DEBUG_PRINTLN(...)
+  #define DEBUG_PRINT(...)
+  #define DEBUG_PRINTF(...)
+  #define DEBUG_PRINTLN(...)
 #endif
 
 // --- Hardware ---
@@ -40,9 +42,14 @@ int failedDirectConnects = 0;
 // --- LDR Backlight Control ---
 #define LDR_PIN 36
 #define BACKLIGHT_PIN 21
-#define PWM_CHANNEL 0
+//#define PWM_CHANNEL 0
 float smoothLdrVal = 2000.0;
 unsigned long lastLdrRead = 0;
+
+//RGB LED Control
+#define RED_LED 4
+#define GREEN_LED 16
+#define BLUE_LED 17
 
 // --- LVGL Display Buffer ---
 static const uint16_t screenWidth  = 320;
@@ -61,25 +68,28 @@ lv_obj_t * avg_kml_label;
 lv_obj_t * load_bar;
 lv_obj_t * status_label;
 
+constexpr uint8_t BORDER_RADIUS=4;
+
 // --- Data Variables ---
 int currentRpm = 0;
 float smoothedRpm = 0.0f;
-float currentBat = 0.0;
+float currentBat = 0.0f;
 int currentCoolantTemp = 0;
 int currentLoad = 0;
 int currentIat = 0;
 int currentMap = 0;
-float currentBoost = 0.0;
+float currentBoost = 0.0f;
 int currentKph = 0;
-float tripDistance = 0.0;
-float tripFuel = 0.0;
-float currentAvgKml = 0.0;
+float tripDistance = 0.0f;
+float tripFuel = 0.0f;
+float currentAvgKml = 0.0f;
 unsigned long lastCalcTime = 0;
 
 // --- Diesel Constants (Ritz 1.3 DDiS) ---
 constexpr float DIESEL_DENSITY = 835.0f; // g/L
 constexpr uint32_t SHIFT_POINT_LO = 1800; // RPM
 constexpr uint32_t SHIFT_POINT_HI = 3500; // RPM
+// constexpr uint32_t RPM_REDLINE = 5500; //Redline
 
 // --- Polling Timers ---
 unsigned long lastElmUpdate = 0;
@@ -105,7 +115,7 @@ lv_obj_t* createDataBlock(lv_obj_t* parent, int x, int y, int w, int h, const ch
   lv_obj_set_style_bg_color(cont, lv_color_hex(0x111111), 0);
   lv_obj_set_style_border_color(cont, lv_color_hex(0x444444), 0);
   lv_obj_set_style_border_width(cont, 2, 0);
-  lv_obj_set_style_radius(cont, 6, 0);
+  lv_obj_set_style_radius(cont, BORDER_RADIUS, 0);
   lv_obj_set_style_pad_all(cont, 2, 0);
   lv_obj_clear_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -148,7 +158,7 @@ void buildUI() {
   lv_obj_set_style_bg_color(center_cont, lv_color_hex(0x111111), 0);
   lv_obj_set_style_border_color(center_cont, lv_color_hex(0x444444), 0);
   lv_obj_set_style_border_width(center_cont, 2, 0);
-  lv_obj_set_style_radius(center_cont, 6, 0);
+  lv_obj_set_style_radius(center_cont, BORDER_RADIUS, 0);
   lv_obj_clear_flag(center_cont, LV_OBJ_FLAG_SCROLLABLE);
 
   rpm_val_label = lv_label_create(center_cont);
@@ -178,7 +188,7 @@ void buildUI() {
   lv_obj_set_style_bg_color(bottom_cont, lv_color_hex(0x111111), 0);
   lv_obj_set_style_border_color(bottom_cont, lv_color_hex(0x444444), 0);
   lv_obj_set_style_border_width(bottom_cont, 2, 0);
-  lv_obj_set_style_radius(bottom_cont, 4, 0);
+  lv_obj_set_style_radius(bottom_cont, BORDER_RADIUS, 0);
   lv_obj_set_style_pad_all(bottom_cont, 4, 0);
   lv_obj_clear_flag(bottom_cont, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -371,16 +381,32 @@ void connectBluetooth() {
 
 void setup() {
   Serial.begin(115200);
-  
-  // Setup PWM backlight control
-  ledcSetup(PWM_CHANNEL, 5000, 8);
-  ledcAttachPin(BACKLIGHT_PIN, PWM_CHANNEL);
-  ledcWrite(PWM_CHANNEL, 255); // Default to full brightness on boot
 
+  // Setup PWM backlight control
+  ledcAttach(BACKLIGHT_PIN, 5000, 8); // Pin, Frequency, Resolution
+  ledcWrite(BACKLIGHT_PIN, 255);       // Pass the PIN directly, not a channel
+
+  //ledcSetup(PWM_CHANNEL, 5000, 8);
+  //ledcAttachPin(BACKLIGHT_PIN, PWM_CHANNEL);
+  //ledcWrite(PWM_CHANNEL, 255); // Default to full brightness on boot
+
+  
   tft.init();
 
   tft.setRotation(1); 
   tft.invertDisplay(false);
+
+  // Initialize the RGB LED pins as outputs
+  pinMode(RED_LED, OUTPUT);
+  pinMode(GREEN_LED, OUTPUT);
+  pinMode(BLUE_LED, OUTPUT);
+
+  // Turn all LEDs off initially (Active Low)
+  digitalWrite(RED_LED, HIGH);
+  digitalWrite(GREEN_LED, HIGH);
+  digitalWrite(BLUE_LED, HIGH);
+  delay(250);
+  digitalWrite(BLUE_LED,LOW); 
 
   lv_init();
 
@@ -417,7 +443,8 @@ void loop() {
     int duty = map((int)smoothLdrVal, 0, 4095, 15, 255);
     if (duty < 15) duty = 15;
     if (duty > 255) duty = 255;
-    ledcWrite(PWM_CHANNEL, duty);
+    //ledcWrite(PWM_CHANNEL, duty);
+    ledcWrite(BACKLIGHT_PIN, duty);
   }
 
   if (!connectedToELM) {
