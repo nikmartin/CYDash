@@ -6,10 +6,11 @@
 #include "BluetoothSerial.h"
 #include "ELMduino.h"
 #include "esp32-hal-ledc.h"
+#include "widgets/led/lv_led.h"
 #include <Preferences.h>
 
 
-#define DEBUG
+//  #define DEBUG
 
 #ifdef DEBUG
   #define DEBUG_PRINT(...) Serial.print(__VA_ARGS__)
@@ -144,23 +145,12 @@ lv_obj_t* createDataBlock(lv_obj_t* parent, int x, int y, int w, int h, const ch
 }
 
 void buildUI() {
+
+  // Screen Object
   lv_obj_t * scr = lv_scr_act();
   lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), LV_PART_MAIN);
-
-  // 1. Shift Lights (Top Row)
-  int led_start_x = 10;
-  int led_spacing = 30;
-  for(int i=0; i<10; i++) {
-    shift_leds[i] = lv_led_create(scr);
-    lv_obj_set_size(shift_leds[i], 24, 12);
-    lv_obj_set_pos(shift_leds[i], led_start_x + (i * led_spacing), 5);
-    if (i < 4) lv_led_set_color(shift_leds[i], lv_color_hex(0x00FF00));
-    else if (i < 7) lv_led_set_color(shift_leds[i], lv_color_hex(0xFFFF00));
-    else lv_led_set_color(shift_leds[i], lv_color_hex(0xFF0000));
-    lv_led_off(shift_leds[i]);
-  }
-
-  // 2. Central RPM Module
+  
+  // 1. Central RPM Module
   lv_obj_t* center_cont = lv_obj_create(scr);
   lv_obj_set_size(center_cont, 140, 172);
   lv_obj_set_pos(center_cont, 90, 24);
@@ -268,7 +258,7 @@ void buildUI() {
   lv_obj_set_style_text_color(center_title, lv_color_hex(0x00FFFF), 0);
   lv_obj_align(center_title, LV_ALIGN_BOTTOM_MID, 0, -15);
 
-  // 3. Peripheral Modules (optimized heights and positions)
+  // 2. Peripheral Modules (optimized heights and positions)
   int col_w = 80, row_h = 54, left_x = 5, right_x = 235;
   coolant_val_label = createDataBlock(scr, left_x, 24, col_w, row_h, "TEMP C", lv_color_hex(0xFF8800));
   iat_val_label     = createDataBlock(scr, left_x, 83, col_w, row_h, "IAT C", lv_color_hex(0xFF8800));
@@ -277,7 +267,7 @@ void buildUI() {
   boost_val_label   = createDataBlock(scr, right_x, 83, col_w, row_h, "BOOST", lv_color_hex(0x00FFFF));
   bat_val_label     = createDataBlock(scr, right_x, 142, col_w, row_h, "BAT V", lv_color_hex(0xFF8800));
   
-  // 4. Bottom Bar (thinned out)
+  // 3. Bottom Bar (thinned out)
   lv_obj_t* bottom_cont = lv_obj_create(scr);
   lv_obj_set_size(bottom_cont, 310, 28);
   lv_obj_set_pos(bottom_cont, 5, 205);
@@ -300,7 +290,22 @@ void buildUI() {
   lv_obj_set_style_text_font(status_label, &lv_font_montserrat_14, 0);
   lv_obj_set_style_text_color(status_label, lv_color_hex(0xFF0000), 0);
   lv_obj_align(status_label, LV_ALIGN_RIGHT_MID, 0, 0);
+
+  // 4. Shift Lights (Top Row)
+  int led_start_x = 10;
+  int led_spacing = 30;
+  for(int i=0; i<10; i++) {
+    shift_leds[i] = lv_led_create(scr);
+    lv_obj_set_size(shift_leds[i], 24, 12);
+    lv_obj_set_pos(shift_leds[i], led_start_x + (i * led_spacing), 5);
+    if (i < 4) lv_led_set_color(shift_leds[i], lv_color_hex(0x00FF00));
+    else if (i < 7) lv_led_set_color(shift_leds[i], lv_color_hex(0xFFFF00));
+    else lv_led_set_color(shift_leds[i], lv_color_hex(0xFF0000));
+    lv_led_off(shift_leds[i]);
+  }
+
 }
+
 
 void updateUI() {
   char buf[32];
@@ -320,8 +325,12 @@ void updateUI() {
   float step = (float)(shift_end - shift_start) / 10.0;
   for(int i = 0; i < 10; i++) {
     int threshold = shift_start + (i * step);
-    if (rpmToUse >= threshold) lv_led_on(shift_leds[i]);
-    else lv_led_off(shift_leds[i]);
+    if (rpmToUse >= threshold) { 
+      lv_led_on(shift_leds[i]);
+    }
+    else {
+      lv_led_off(shift_leds[i]);
+    }
   }
   if (rpmToUse >= shift_end && (millis() / 100) % 2 == 0) {
     for(int i=7; i<10; i++) lv_led_off(shift_leds[i]);
@@ -431,6 +440,7 @@ void connectBluetooth() {
         }
       }
     }
+
   }
 
   if (!found) {
@@ -508,9 +518,9 @@ void setup() {
   // Turn all LEDs off initially (Active Low)
   digitalWrite(RED_LED, HIGH);
   digitalWrite(GREEN_LED, HIGH);
-  digitalWrite(BLUE_LED, HIGH);
+  digitalWrite(BLUE_LED, LOW);
   delay(250);
-  digitalWrite(BLUE_LED,LOW); 
+  digitalWrite(BLUE_LED, HIGH);
 
   lv_init();
 
@@ -527,7 +537,8 @@ void setup() {
     preferences.getBytes("mac", storedMac, 6);
   }
   preferences.end();
-
+  
+ 
   ELM_PORT.begin("ESP32_CYDash", true); 
   connectBluetooth();
 }
