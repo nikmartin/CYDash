@@ -6,6 +6,19 @@
 #include "ELMduino.h"
 #include <Preferences.h>
 
+//#define DEBUG
+
+
+#ifdef DEBUG
+#define DEBUG_PRINT(...) Serial.println(__VA_ARGS__)
+#define DEBUG_PRINTF(...) Serial.printf(__VA_ARGS__)
+#define DEBUG_PRINTLN(...) Serial.println(__VA_ARGS__)
+#else
+#define DEBUG_PRINT(...)
+#define DEBUG_PRINTF(...)
+#define DEBUG_PRINTLN(...)
+#endif
+
 // --- Hardware ---
 TFT_eSPI tft = TFT_eSPI();
 
@@ -14,7 +27,7 @@ BluetoothSerial SerialBT;
 #define ELM_PORT SerialBT
 ELM327 myELM327;
 
-const char* elmName = "OBDII"; 
+const char* elmName = "JFIND JF327"; 
 bool connectedToELM = false;
 bool btConnecting = false;
 
@@ -64,14 +77,14 @@ float currentAvgKml = 0.0;
 unsigned long lastCalcTime = 0;
 
 // --- Diesel Constants (Ritz 1.3 DDiS) ---
-const float DIESEL_DENSITY = 835.0; // g/L
+constexpr float DIESEL_DENSITY = 835.0f; // g/L
+constexpr uint32_t SHIFT_POINT_LO = 1800; // RPM
+constexpr uint32_t SHIFT_POINT_HI = 3500; // RPM
 
 // --- Polling Timers ---
 unsigned long lastElmUpdate = 0;
-const unsigned long elmInterval = 20; // Reverted back to 20 for stable clone processing
-unsigned long lastCoolantQuery = 0;
-unsigned long lastIatQuery = 0;
-unsigned long lastBatQuery = 0;
+constexpr uint32_t ELM_INTERVAL_MS = 20; // Reverted back to 20 for stable clone processing
+
 
 // --- LVGL Display Flush Callback ---
 void my_disp_flush(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
@@ -135,7 +148,7 @@ void buildUI() {
   lv_obj_set_style_bg_color(center_cont, lv_color_hex(0x111111), 0);
   lv_obj_set_style_border_color(center_cont, lv_color_hex(0x444444), 0);
   lv_obj_set_style_border_width(center_cont, 2, 0);
-  lv_obj_set_style_radius(center_cont, 8, 0);
+  lv_obj_set_style_radius(center_cont, 6, 0);
   lv_obj_clear_flag(center_cont, LV_OBJ_FLAG_SCROLLABLE);
 
   rpm_val_label = lv_label_create(center_cont);
@@ -165,6 +178,7 @@ void buildUI() {
   lv_obj_set_style_bg_color(bottom_cont, lv_color_hex(0x111111), 0);
   lv_obj_set_style_border_color(bottom_cont, lv_color_hex(0x444444), 0);
   lv_obj_set_style_border_width(bottom_cont, 2, 0);
+  lv_obj_set_style_radius(bottom_cont, 4, 0);
   lv_obj_set_style_pad_all(bottom_cont, 4, 0);
   lv_obj_clear_flag(bottom_cont, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -196,7 +210,7 @@ void updateUI() {
   int rpmToUse = (int)smoothedRpm;
 
   // 1. Shift Lights (updated every frame for smooth progression and flash flashing logic)
-  int shift_start = 1800, shift_end = 3500; 
+  int shift_start = SHIFT_POINT_LO, shift_end = SHIFT_POINT_HI; 
   float step = (float)(shift_end - shift_start) / 10.0;
   for(int i = 0; i < 10; i++) {
     int threshold = shift_start + (i * step);
@@ -278,25 +292,25 @@ void connectBluetooth() {
   bool found = false;
 
   if (hasStoredMac && failedDirectConnects < 3) {
-    Serial.print("Attempting direct connection to saved MAC: ");
-    for(int i=0; i<6; i++) Serial.printf("%02X%s", storedMac[i], (i<5)?":":"\n");
+    DEBUG_PRINT("Attempting direct connection to saved MAC: ");
+    for(int i=0; i<6; i++) DEBUG_PRINTF("%02X%s", storedMac[i], (i<5)?":":"\n");
     memcpy(obdMac, storedMac, 6);
     found = true;
   } else {
     if (hasStoredMac) {
-      Serial.println("Failed direct connection 3 times. Resetting MAC and scanning...");
+      DEBUG_PRINTLN("Failed direct connection 3 times. Resetting MAC and scanning...");
     }
-    Serial.println("Scanning the air for OBDII...");
+    DEBUG_PRINTLN("Scanning the air for OBDII...");
     BTScanResults* results = ELM_PORT.discover(5000); // 5 sec scan
 
     if (results) {
       for (int i = 0; i < results->getCount(); i++) {
         BTAdvertisedDevice* device = results->getDevice(i);
-        Serial.printf("Found: %s (MAC: %s)\n", device->getName().c_str(), device->getAddress().toString().c_str());
+        DEBUG_PRINTF("Found: %s (MAC: %s)\n", device->getName().c_str(), device->getAddress().toString().c_str());
         
         String name = device->getName().c_str();
-        if (name.equalsIgnoreCase("OBDII")) {
-          Serial.println("Found match!");
+        if (name.equalsIgnoreCase(elmName)) {
+          DEBUG_PRINTLN("Found match!");
           memcpy(obdMac, (uint8_t*)device->getAddress().getNative(), 6);
           found = true;
           break;
@@ -306,16 +320,16 @@ void connectBluetooth() {
   }
 
   if (!found) {
-    Serial.println("Couldn't find OBDII in the air! Make sure phone is disconnected.");
+    DEBUG_PRINTLN("Couldn't find OBDII in the air! Make sure phone is disconnected.");
     connectedToELM = false;
     btConnecting = false;
     updateBTStatus();
     return;
   }
 
-  Serial.println("Attempting to connect to OBDII via MAC...");
+  DEBUG_PRINTLN("Attempting to connect to OBDII via MAC...");
   if (!ELM_PORT.connect(obdMac, 0, sec_mask, role)) {
-    Serial.println("Couldn't connect to OBD scanner");
+    DEBUG_PRINTLN("Couldn't connect to OBD scanner");
     if (hasStoredMac && failedDirectConnects < 3) {
       failedDirectConnects++;
     } else {
@@ -327,17 +341,17 @@ void connectBluetooth() {
     return;
   }
 
-  Serial.println("Connected to Bluetooth OBDII scanner!");
+  DEBUG_PRINTLN("Connected to Bluetooth OBDII scanner!");
   
   // Restored original safe clone adapter flags ('0', 20, 0)
   if (!myELM327.begin(ELM_PORT, true, 2000, '0', 20, 0)) {
-    Serial.println("Couldn't initialize ELM327");
+    DEBUG_PRINTLN("Couldn't initialize ELM327");
     connectedToELM = false;
     if (hasStoredMac && failedDirectConnects < 3) {
       failedDirectConnects++;
     }
   } else {
-    Serial.println("Connected to ELM327!");
+    DEBUG_PRINTLN("Connected to ELM327!");
     connectedToELM = true;
     failedDirectConnects = 0;
     if (!hasStoredMac || memcmp(storedMac, obdMac, 6) != 0) {
@@ -347,7 +361,7 @@ void connectBluetooth() {
       preferences.end();
       memcpy(storedMac, obdMac, 6);
       hasStoredMac = true;
-      Serial.println("Saved MAC address to NVS.");
+      DEBUG_PRINTLN("Saved MAC address to NVS.");
     }
   }
   
@@ -434,14 +448,14 @@ void loop() {
     updateUI();
   }
 
-  if (now - lastElmUpdate > elmInterval) {
+  if (now - lastElmUpdate > ELM_INTERVAL_MS) {
     lastElmUpdate = now;
 
     // Flat 32-slot schedule - explicit and starvation-proof.
     // PID codes: 0=RPM, 1=MAP, 2=Load, 3=KPH, 4=Coolant, 5=IAT, 6=Battery
     // RPM gets 16/32 (50%), MAP gets 8/32 (25%), Load 4/32 (12.5%),
     // Coolant/IAT/Battery/KPH each get 1/32 (~3%). Every PID guaranteed a turn.
-    static const int SCHED[] = {
+    static const uint8_t SCHED[] = {
       0, 1, 0, 2,   // RPM, MAP, RPM, Load
       0, 1, 0, 4,   // RPM, MAP, RPM, Coolant
       0, 1, 0, 2,   // RPM, MAP, RPM, Load
@@ -451,8 +465,8 @@ void loop() {
       0, 1, 0, 2,   // RPM, MAP, RPM, Load
       0, 1, 0, 3    // RPM, MAP, RPM, KPH
     };
-    static const int SCHED_LEN = 32;
-    static int scheduleIndex = 0;
+    static const uint8_t SCHED_LEN = 32;
+    static uint8_t scheduleIndex = 0;
 
     bool advancedSlot = false;
     switch(SCHED[scheduleIndex]) {
@@ -495,10 +509,10 @@ void loop() {
       case 6: { // Battery
         float val = myELM327.batteryVoltage();
         if (myELM327.nb_rx_state == ELM_SUCCESS) {
-          Serial.printf("[BAT] SUCCESS val=%.2f\n", val);
+          DEBUG_PRINTF("[BAT] SUCCESS val=%.2f\n", val);
           currentBat = val; advancedSlot = true;
         } else if (myELM327.nb_rx_state != ELM_GETTING_MSG) {
-          Serial.printf("[BAT] FAIL state=%d\n", myELM327.nb_rx_state);
+          DEBUG_PRINTF("[BAT] FAIL state=%d\n", myELM327.nb_rx_state);
           advancedSlot = true;
         }
         break;
