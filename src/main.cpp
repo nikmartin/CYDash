@@ -89,7 +89,7 @@ unsigned long lastCalcTime = 0;
 constexpr float DIESEL_DENSITY = 835.0f; // g/L
 constexpr uint32_t SHIFT_POINT_LO = 1800; // RPM
 constexpr uint32_t SHIFT_POINT_HI = 3500; // RPM
-// constexpr uint32_t RPM_REDLINE = 5500; //Redline
+constexpr uint32_t RPM_REDLINE = 5500; //Redline
 
 // --- Polling Timers ---
 unsigned long lastElmUpdate = 0;
