@@ -334,7 +334,7 @@ void updateUI() {
   // 2. Labels & Background RPM Bar (only update when values actually change to save CPU cycles)
   if (rpmToUse != lastDispRpm) {
     lastDispRpm = rpmToUse;
-    sprintf(buf, "%d", rpmToUse);
+    snprintf(buf, sizeof(buf), "%d", rpmToUse);
     lv_label_set_text(rpm_val_label, buf);
 
     // Update vertical RPM background bar fill level and redline indicator color
@@ -351,41 +351,41 @@ void updateUI() {
   if (fabs(currentSpeed - lastDispSpeed) > 0) {
     lastDispSpeed = currentSpeed;
     if (currentSpeed > 0) {
-      sprintf(buf, "%02d", currentSpeed);
+      snprintf(buf, sizeof(buf), "%02d", currentSpeed);
     }
     else {
-      sprintf(buf, "--");
+      snprintf(buf, sizeof(buf), "--");
     }
     lv_label_set_text(speed_label, buf);
   }
 
   if (fabs(currentBat - lastDispBat) > 0.05f) {
     lastDispBat = currentBat;
-    sprintf(buf, "%.1f", currentBat);
+    snprintf(buf, sizeof(buf), "%.1f", currentBat);
     lv_label_set_text(bat_val_label, buf);
   }
 
   if (currentCoolantTemp != lastDispCoolant) {
     lastDispCoolant = currentCoolantTemp;
-    sprintf(buf, "%d", currentCoolantTemp);
+    snprintf(buf, sizeof(buf), "%d", currentCoolantTemp);
     lv_label_set_text(coolant_val_label, buf);
   }
 
   if (currentIat != lastDispIat) {
     lastDispIat = currentIat;
-    sprintf(buf, "%d", currentIat);
+    snprintf(buf, sizeof(buf), "%d", currentIat);
     lv_label_set_text(iat_val_label, buf);
   }
 
   if (currentLoad != lastDispLoad) {
     lastDispLoad = currentLoad;
-    sprintf(buf, "%d", currentLoad);
+    snprintf(buf, sizeof(buf), "%d", currentLoad);
     lv_label_set_text(load_val_label, buf);
     lv_bar_set_value(load_bar, currentLoad, LV_ANIM_ON);
   }
 
   //TODO: Replace the Boost label
-    sprintf(buf, "%.2f", 420.69f);
+    snprintf(buf, sizeof(buf), "%.2f", 420.69f);
     lv_label_set_text(boost_val_label, buf);
   
 }
@@ -598,13 +598,13 @@ void loop() {
     // RPM gets 16/32 (50%), MAP gets 8/32 (25%), Load 4/32 (12.5%),
     // Coolant/IAT/Battery/KPH each get 1/32 (~3%). Every PID guaranteed a turn.
     static const uint8_t SCHED[] = {
-      0, 3, 0, 2,   // RPM, MAP, RPM, Load
+      0, 3, 0, 2,   // RPM, MPH, RPM, Load
       0, 3, 0, 4,   // RPM, MPH, RPM, Coolant
-      0, 3, 0, 2,   // RPM, MAP, RPM, Load
+      0, 3, 0, 2,   // RPM, MPH, RPM, Load
       0, 3, 0, 5,   // RPM, MPH, RPM, IAT
-      0, 3, 0, 2,   // RPM, MAP, RPM, Load
+      0, 3, 0, 2,   // RPM, MPH, RPM, Load
       0, 3, 0, 6,   // RPM, MPH, RPM, Battery
-      0, 1, 0, 2,   // RPM, MAP, RPM, Load
+      0, 3, 0, 2,   // RPM, MPH, RPM, Load
       0, 3, 0, 3    // RPM, MPH, RPM, MPH
     };
     static const uint8_t SCHED_LEN = 32;
