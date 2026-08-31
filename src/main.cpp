@@ -68,7 +68,7 @@ lv_obj_t * coolant_val_label;
 lv_obj_t * iat_val_label;
 lv_obj_t * load_val_label;
 lv_obj_t * boost_val_label;
-lv_obj_t * avg_kml_label;
+lv_obj_t * speed_label;
 lv_obj_t * load_bar;
 lv_obj_t * status_label;
 
@@ -81,19 +81,13 @@ float currentBat = 0.0f;
 int currentCoolantTemp = 0;
 int currentLoad = 0;
 int currentIat = 0;
-int currentMap = 0;
-float currentBoost = 0.0f;
-int currentKph = 0;
-float tripDistance = 0.0f;
-float tripFuel = 0.0f;
-float currentAvgKml = 0.0f;
-unsigned long lastCalcTime = 0;
+int currentSpeed = 0;
 
 // --- Engine & RPM Constants ---
-constexpr float DIESEL_DENSITY = 835.0f; // g/L
-constexpr uint32_t SHIFT_POINT_LO = 1800; // RPM
-constexpr uint32_t SHIFT_POINT_HI = 3500; // RPM
+constexpr uint32_t SHIFT_POINT_LO = 2500; // RPM
+constexpr uint32_t SHIFT_POINT_HI = 4500; // RPM
 constexpr uint32_t RPM_REDLINE = 5500; // Redline RPM
+constexpr uint8_t SPEED_SAFETY_FACTOR=1;
 
 // --- HUD Color Constants ---
 constexpr uint32_t COLOR_BAR_NORMAL    = 0x008000; // Dark Green
@@ -150,7 +144,20 @@ void buildUI() {
   lv_obj_t * scr = lv_scr_act();
   lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), LV_PART_MAIN);
   
-  // 1. Central RPM Module
+   // 1. Shift Lights (Top Row)
+  int led_start_x = 10;
+  int led_spacing = 30;
+  for(int i=0; i<10; i++) {
+    shift_leds[i] = lv_led_create(scr);
+    lv_obj_set_size(shift_leds[i], 24, 12);
+    lv_obj_set_pos(shift_leds[i], led_start_x + (i * led_spacing), 5);
+    if (i < 4) lv_led_set_color(shift_leds[i], lv_color_hex(0x00FF00));
+    else if (i < 7) lv_led_set_color(shift_leds[i], lv_color_hex(0xFFFF00));
+    else lv_led_set_color(shift_leds[i], lv_color_hex(0xFF0000));
+    lv_led_off(shift_leds[i]);
+  }
+  
+  // 2. Central RPM Module
   lv_obj_t* center_cont = lv_obj_create(scr);
   lv_obj_set_size(center_cont, 140, 172);
   lv_obj_set_pos(center_cont, 90, 24);
@@ -258,16 +265,16 @@ void buildUI() {
   lv_obj_set_style_text_color(center_title, lv_color_hex(0x00FFFF), 0);
   lv_obj_align(center_title, LV_ALIGN_BOTTOM_MID, 0, -15);
 
-  // 2. Peripheral Modules (optimized heights and positions)
+  // 3. Peripheral Modules (optimized heights and positions)
   int col_w = 80, row_h = 54, left_x = 5, right_x = 235;
   coolant_val_label = createDataBlock(scr, left_x, 24, col_w, row_h, "TEMP C", lv_color_hex(0xFF8800));
   iat_val_label     = createDataBlock(scr, left_x, 83, col_w, row_h, "IAT C", lv_color_hex(0xFF8800));
   load_val_label    = createDataBlock(scr, left_x, 142, col_w, row_h, "LOAD %", lv_color_hex(0xBF00FF));
-  avg_kml_label     = createDataBlock(scr, right_x, 24, col_w, row_h, "AVG KML", lv_color_hex(0x00FF00));
-  boost_val_label   = createDataBlock(scr, right_x, 83, col_w, row_h, "BOOST", lv_color_hex(0x00FFFF));
+  speed_label       = createDataBlock(scr, right_x, 24, col_w, row_h, "MPH", lv_color_hex(0x00FF00));
+  boost_val_label   = createDataBlock(scr, right_x, 83, col_w, row_h, ";)", lv_color_hex(0x00FFFF));
   bat_val_label     = createDataBlock(scr, right_x, 142, col_w, row_h, "BAT V", lv_color_hex(0xFF8800));
   
-  // 3. Bottom Bar (thinned out)
+  // 4. Bottom Bar (thinned out)
   lv_obj_t* bottom_cont = lv_obj_create(scr);
   lv_obj_set_size(bottom_cont, 310, 28);
   lv_obj_set_pos(bottom_cont, 5, 205);
@@ -291,18 +298,7 @@ void buildUI() {
   lv_obj_set_style_text_color(status_label, lv_color_hex(0xFF0000), 0);
   lv_obj_align(status_label, LV_ALIGN_RIGHT_MID, 0, 0);
 
-  // 4. Shift Lights (Top Row)
-  int led_start_x = 10;
-  int led_spacing = 30;
-  for(int i=0; i<10; i++) {
-    shift_leds[i] = lv_led_create(scr);
-    lv_obj_set_size(shift_leds[i], 24, 12);
-    lv_obj_set_pos(shift_leds[i], led_start_x + (i * led_spacing), 5);
-    if (i < 4) lv_led_set_color(shift_leds[i], lv_color_hex(0x00FF00));
-    else if (i < 7) lv_led_set_color(shift_leds[i], lv_color_hex(0xFFFF00));
-    else lv_led_set_color(shift_leds[i], lv_color_hex(0xFF0000));
-    lv_led_off(shift_leds[i]);
-  }
+ 
 
 }
 
@@ -311,13 +307,12 @@ void updateUI() {
   char buf[32];
   
   static int lastDispRpm = -999;
-  static float lastDispAvgKml = -999.0f;
+  static int lastDispSpeed = -999;
   static float lastDispBat = -999.0f;
   static int lastDispCoolant = -999;
   static int lastDispIat = -999;
   static int lastDispLoad = -999;
-  static float lastDispBoost = -999.0f;
-
+    
   int rpmToUse = (int)smoothedRpm;
 
   // 1. Shift Lights (updated every frame for smooth progression and flash flashing logic)
@@ -351,11 +346,17 @@ void updateUI() {
     }
   }
 
-  if (fabs(currentAvgKml - lastDispAvgKml) > 0.05f) {
-    lastDispAvgKml = currentAvgKml;
-    if (currentAvgKml > 0.0) sprintf(buf, "%.1f", currentAvgKml);
-    else sprintf(buf, "--");
-    lv_label_set_text(avg_kml_label, buf);
+  //add in the safety factor so we don't drive too fast.
+  
+  if (fabs(currentSpeed - lastDispSpeed) > 0) {
+    lastDispSpeed = currentSpeed;
+    if (currentSpeed > 0) {
+      sprintf(buf, "%02d", currentSpeed);
+    }
+    else {
+      sprintf(buf, "--");
+    }
+    lv_label_set_text(speed_label, buf);
   }
 
   if (fabs(currentBat - lastDispBat) > 0.05f) {
@@ -383,11 +384,10 @@ void updateUI() {
     lv_bar_set_value(load_bar, currentLoad, LV_ANIM_ON);
   }
 
-  if (fabs(currentBoost - lastDispBoost) > 0.01f) {
-    lastDispBoost = currentBoost;
-    sprintf(buf, "%.2f", currentBoost);
+  //TODO: Replace the Boost label
+    sprintf(buf, "%.2f", 420.69f);
     lv_label_set_text(boost_val_label, buf);
-  }
+  
 }
 
 void updateBTStatus() {
@@ -598,14 +598,14 @@ void loop() {
     // RPM gets 16/32 (50%), MAP gets 8/32 (25%), Load 4/32 (12.5%),
     // Coolant/IAT/Battery/KPH each get 1/32 (~3%). Every PID guaranteed a turn.
     static const uint8_t SCHED[] = {
+      0, 3, 0, 2,   // RPM, MAP, RPM, Load
+      0, 3, 0, 4,   // RPM, MPH, RPM, Coolant
+      0, 3, 0, 2,   // RPM, MAP, RPM, Load
+      0, 3, 0, 5,   // RPM, MPH, RPM, IAT
+      0, 3, 0, 2,   // RPM, MAP, RPM, Load
+      0, 3, 0, 6,   // RPM, MPH, RPM, Battery
       0, 1, 0, 2,   // RPM, MAP, RPM, Load
-      0, 1, 0, 4,   // RPM, MAP, RPM, Coolant
-      0, 1, 0, 2,   // RPM, MAP, RPM, Load
-      0, 1, 0, 5,   // RPM, MAP, RPM, IAT
-      0, 1, 0, 2,   // RPM, MAP, RPM, Load
-      0, 1, 0, 6,   // RPM, MAP, RPM, Battery
-      0, 1, 0, 2,   // RPM, MAP, RPM, Load
-      0, 1, 0, 3    // RPM, MAP, RPM, KPH
+      0, 3, 0, 3    // RPM, MPH, RPM, MPH
     };
     static const uint8_t SCHED_LEN = 32;
     static uint8_t scheduleIndex = 0;
@@ -618,22 +618,22 @@ void loop() {
         else if (myELM327.nb_rx_state != ELM_GETTING_MSG) advancedSlot = true;
         break;
       }
-      case 1: { // MAP
-        float val = myELM327.manifoldPressure();
-        if (myELM327.nb_rx_state == ELM_SUCCESS) { currentMap = (int)val; advancedSlot = true; }
-        else if (myELM327.nb_rx_state != ELM_GETTING_MSG) advancedSlot = true;
-        break;
-      }
+    
       case 2: { // Load
         float val = myELM327.engineLoad();
         if (myELM327.nb_rx_state == ELM_SUCCESS) { currentLoad = (int)val; advancedSlot = true; }
         else if (myELM327.nb_rx_state != ELM_GETTING_MSG) advancedSlot = true;
         break;
       }
-      case 3: { // KPH
-        float val = myELM327.kph();
-        if (myELM327.nb_rx_state == ELM_SUCCESS) { currentKph = (int)val; advancedSlot = true; }
-        else if (myELM327.nb_rx_state != ELM_GETTING_MSG) advancedSlot = true;
+      case 3: { // MPH
+        float val = myELM327.mph();
+        if (myELM327.nb_rx_state == ELM_SUCCESS) { 
+          currentSpeed = (int)val + SPEED_SAFETY_FACTOR; 
+          advancedSlot = true; 
+        }
+        else if (myELM327.nb_rx_state != ELM_GETTING_MSG) {
+          advancedSlot = true;
+        }
         break;
       }
       case 4: { // Coolant
@@ -651,10 +651,8 @@ void loop() {
       case 6: { // Battery
         float val = myELM327.batteryVoltage();
         if (myELM327.nb_rx_state == ELM_SUCCESS) {
-          DEBUG_PRINTF("[BAT] SUCCESS val=%.2f\n", val);
           currentBat = val; advancedSlot = true;
         } else if (myELM327.nb_rx_state != ELM_GETTING_MSG) {
-          DEBUG_PRINTF("[BAT] FAIL state=%d\n", myELM327.nb_rx_state);
           advancedSlot = true;
         }
         break;
@@ -665,32 +663,6 @@ void loop() {
       scheduleIndex = (scheduleIndex + 1) % SCHED_LEN;
     }
 
-    // --- Diesel Fuel & Boost Calculations ---
-    if (currentRpm > 400) { 
-      if (lastCalcTime == 0) lastCalcTime = now;
-      else {
-        float dt = (float)(now - lastCalcTime) / 1000.0;
-        lastCalcTime = now;
-        if (dt > 0.0 && dt < 2.0) {
-          float iatK = (float)currentIat + 273.15;
-          
-          float maf = ((float)currentRpm * (float)currentMap / iatK) * 0.00185;
-          float afr = 50.0 - ((float)currentLoad * 0.32); 
-          if (afr < 16.0) afr = 16.0; 
-          
-          float fuelFlowLps = maf / (afr * DIESEL_DENSITY);
-          tripFuel += fuelFlowLps * dt;
-          tripDistance += ((float)currentKph / 3600.0) * dt;
-          if (tripFuel > 0.0001) currentAvgKml = tripDistance / tripFuel;
-
-          // Convert MAP to Relative Boost (Bar)
-          currentBoost = ((float)currentMap - 101.3) / 100.0;
-          if (currentBoost < 0.0) currentBoost = 0.0; 
-        }
-      }
-    } else { 
-      lastCalcTime = 0; 
-      currentBoost = 0.0;
-    }
+    //
   }
 }
